@@ -18,7 +18,8 @@ class MidiProcessor:
                     target_bpm: int = 120, 
                     remove_cc: bool = True, 
                     set_velocity: bool = True,
-                    velocity_percent: int = 80) -> Dict[str, Any]:
+                    velocity_percent: int = 80,
+                    skip_matched: bool = True) -> Dict[str, Any]:
         """
         处理单个MIDI文件
         
@@ -29,6 +30,7 @@ class MidiProcessor:
             remove_cc: 是否删除控制消息
             set_velocity: 是否设置固定力度
             velocity_percent: 力度百分比(1-127)
+            skip_matched: 如果文件已匹配条件则跳过处理
             
         Returns:
             包含处理结果信息的字典
@@ -51,6 +53,121 @@ class MidiProcessor:
             # 分析原始速度信息 - 直接从文件中读取
             print("\n===== 原始MIDI分析 =====")
             self._analyze_tempo(midi)
+            
+            # 计算实际力度值 (将百分比正确转换为MIDI力度值，范围1-127)
+            target_velocity = min(127, max(1, int(127 * velocity_percent / 100)))
+
+            # 检查是否需要处理
+            needs_processing = True
+            cc_status = "已处理"  # 默认状态
+            velocity_status = "已处理"  # 默认状态
+            
+            # 检查原始BPM是否与目标BPM一致
+            original_bpm = self._tempo_to_bpm(self.original_tempo) if self.original_tempo else 120
+            bpm_matches = abs(original_bpm - target_bpm) < 0.1  # 允许0.1的误差
+            
+            # 检查文件是否包含任何控制消息
+            has_cc_messages = False
+            for track in midi.tracks:
+                for msg in track:
+                    if msg.type in ['control_change', 'pitchwheel', 'program_change', 
+                                  'aftertouch', 'polytouch', 'sysex']:
+                        has_cc_messages = True
+                        break
+                if has_cc_messages:
+                    break
+            
+            # 检查音符力度是否已经是目标力度
+            all_notes_match_velocity = True
+            has_notes = False
+            for track in midi.tracks:
+                for msg in track:
+                    if msg.type == 'note_on' and msg.velocity > 0:
+                        has_notes = True
+                        if abs(msg.velocity - target_velocity) > 3:  # 允许小误差
+                            all_notes_match_velocity = False
+                            break
+                if has_notes and not all_notes_match_velocity:
+                    break
+            
+            # 根据检查结果确定处理状态
+            if bpm_matches:
+                # 原始BPM与目标BPM匹配的情况
+                
+                # 1. 已勾选移除控制消息，但MIDI内不含控制信息
+                if remove_cc and not has_cc_messages:
+                    cc_status = "无需处理"
+                    # 无论是否勾选统一音符力度，都不处理MIDI
+                    needs_processing = False
+                    
+                    # 设置音符力度状态
+                    if set_velocity:
+                        if all_notes_match_velocity:
+                            velocity_status = "无需处理"
+                        else:
+                            velocity_status = "未处理"  # 音符力度不匹配但不处理
+                    else:
+                        velocity_status = "未选择"
+                
+                # 2. 未勾选移除控制消息
+                elif not remove_cc:
+                    cc_status = "未选择"
+                    if set_velocity:
+                        if all_notes_match_velocity:
+                            velocity_status = "无需处理"
+                            needs_processing = False  # 如果BPM相同、不删除CC且力度已匹配，则不需要处理
+                        else:
+                            velocity_status = "已处理"
+                    else:
+                        velocity_status = "未选择"
+                        needs_processing = False  # 如果BPM相同且不做任何处理，则不需要处理
+                
+                # 3. 已勾选移除控制消息，且MIDI内包含控制消息需要移除
+                else:  # remove_cc and has_cc_messages
+                    cc_status = "已处理"
+                    if set_velocity:
+                        if all_notes_match_velocity:
+                            velocity_status = "无需处理"
+                        else:
+                            velocity_status = "已处理"
+                    else:
+                        velocity_status = "未选择"
+            
+            # 如果不需要处理，直接返回结果
+            if not needs_processing and skip_matched:
+                print(f"文件不需要处理: BPM已匹配, CC状态: {cc_status}, 力度状态: {velocity_status}")
+                # 收集所有原始音符的绝对秒位置(仅用于信息返回)
+                note_positions = self._collect_note_positions(midi)
+                
+                # 准备输出路径(即使不处理，也提供给用户)
+                filename = os.path.basename(input_file)
+                output_path = os.path.join(output_dir, filename)
+                
+                # 返回处理结果信息
+                tempo_info = []
+                for idx, (time_ticks, tempo, time_seconds, measure_beat) in enumerate(self.detailed_tempos):
+                    tempo_info.append({
+                        "id": idx + 1,
+                        "time_ticks": time_ticks,
+                        "time_seconds": time_seconds,
+                        "measure_beat": measure_beat,
+                        "tempo": tempo,
+                        "bpm": self._tempo_to_bpm(tempo)
+                    })
+                
+                return {
+                    "filename": filename,
+                    "original_bpm": self._tempo_to_bpm(self.original_tempo) if self.original_tempo else "未知",
+                    "target_bpm": target_bpm,
+                    "velocity_modified": set_velocity,
+                    "velocity_status": velocity_status,
+                    "cc_removed": remove_cc,
+                    "cc_status": cc_status,
+                    "tempo_changes": tempo_info,
+                    "note_count": len(note_positions),
+                    "status": "无需处理",
+                    "path": output_path
+                }
             
             # 收集所有原始音符的绝对秒位置
             print("\n===== 收集原始音符位置 =====")
@@ -87,7 +204,9 @@ class MidiProcessor:
                 "original_bpm": self._tempo_to_bpm(self.original_tempo) if self.original_tempo else "未知",
                 "target_bpm": target_bpm,
                 "velocity_modified": set_velocity,
+                "velocity_status": velocity_status,
                 "cc_removed": remove_cc,
+                "cc_status": cc_status,
                 "tempo_changes": tempo_info,
                 "note_count": len(note_positions),
                 "status": "成功",
@@ -103,7 +222,9 @@ class MidiProcessor:
                 "original_bpm": "未知",
                 "target_bpm": target_bpm,
                 "velocity_modified": set_velocity,
+                "velocity_status": "处理失败",
                 "cc_removed": remove_cc,
+                "cc_status": "处理失败",
                 "tempo_changes": [],
                 "note_count": 0,
                 "status": f"错误: {str(e)}",

@@ -1,4 +1,4 @@
-pyimport sys
+import sys
 import os
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QIcon

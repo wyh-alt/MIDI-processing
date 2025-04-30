@@ -5,11 +5,18 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                            QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar, 
                            QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, 
                            QMessageBox, QGroupBox, QFormLayout, QTextEdit, QSplitter,
-                           QTabWidget, QDialog)
+                           QTabWidget, QDialog, QSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFont, QIntValidator
 
 from midi_processor import MidiProcessor
+
+# 导入Excel导出相关库
+try:
+    import pandas as pd
+    EXCEL_EXPORT_AVAILABLE = True
+except ImportError:
+    EXCEL_EXPORT_AVAILABLE = False
 
 class WorkerThread(QThread):
     """处理MIDI文件的工作线程"""
@@ -19,7 +26,8 @@ class WorkerThread(QThread):
     finished = pyqtSignal()                 # 处理完成信号
     
     def __init__(self, processor, files=None, input_dir=None, output_dir=None, 
-                target_bpm=120, remove_cc=True, set_velocity=True, velocity_percent=80):
+                target_bpm=120, remove_cc=True, set_velocity=True, velocity_percent=80,
+                skip_matched=True):
         super().__init__()
         self.processor = processor
         self.files = files or []
@@ -29,6 +37,7 @@ class WorkerThread(QThread):
         self.remove_cc = remove_cc
         self.set_velocity = set_velocity
         self.velocity_percent = velocity_percent
+        self.skip_matched = skip_matched
         
         # 重定向标准输出
         self.old_stdout = sys.stdout
@@ -158,9 +167,10 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         main_layout = QVBoxLayout(central_widget)
         
-        # 创建输入区域
-        input_group = QGroupBox("输入设置")
-        input_layout = QFormLayout()
+        # 创建文件选择区域 (不使用GroupBox)
+        file_widget = QWidget()
+        file_layout = QFormLayout(file_widget)
+        file_layout.setContentsMargins(10, 10, 10, 10)
         
         # 创建目录选择区域
         dir_layout = QHBoxLayout()
@@ -171,7 +181,7 @@ class MainWindow(QMainWindow):
         browse_input_btn.clicked.connect(self.browse_input_directory)
         dir_layout.addWidget(self.input_dir_edit)
         dir_layout.addWidget(browse_input_btn)
-        input_layout.addRow("MIDI文件目录:", dir_layout)
+        file_layout.addRow("MIDI文件目录:", dir_layout)
         
         # 创建输出目录选择区域
         output_dir_layout = QHBoxLayout()
@@ -182,35 +192,62 @@ class MainWindow(QMainWindow):
         browse_output_btn.clicked.connect(self.browse_output_directory)
         output_dir_layout.addWidget(self.output_dir_edit)
         output_dir_layout.addWidget(browse_output_btn)
-        input_layout.addRow("输出目录:", output_dir_layout)
+        file_layout.addRow("输出目录:", output_dir_layout)
         
-        # 目标BPM输入
-        self.target_bpm_edit = QLineEdit("120")
-        self.target_bpm_edit.setValidator(QIntValidator(1, 999))
-        input_layout.addRow("目标BPM:", self.target_bpm_edit)
+        # 优化选项部分的布局 - 使用网格布局使其更紧凑
+        options_widget = QWidget()
+        options_layout = QHBoxLayout(options_widget)
+        options_layout.setContentsMargins(0, 0, 0, 0)
         
-        # 添加选项复选框
-        options_layout = QHBoxLayout()
-        self.remove_cc_checkbox = QCheckBox("删除所有控制信息 (CC/PC/压力等)")
+        # 左侧参数设置
+        params_layout = QFormLayout()
+        
+        # BPM设置
+        bpm_layout = QHBoxLayout()
+        self.target_bpm_label = QLabel("目标BPM:")
+        self.target_bpm_spinbox = QSpinBox()
+        self.target_bpm_spinbox.setRange(1, 999)
+        self.target_bpm_spinbox.setValue(120)
+        bpm_layout.addWidget(self.target_bpm_spinbox)
+        params_layout.addRow(self.target_bpm_label, self.target_bpm_spinbox)
+        
+        # 力度设置
+        self.velocity_label = QLabel("力度百分比:")
+        self.velocity_spinbox = QSpinBox()
+        self.velocity_spinbox.setRange(1, 100)
+        self.velocity_spinbox.setValue(80)
+        self.velocity_spinbox.setToolTip("设置音符力度的百分比 (1-100)")
+        params_layout.addRow(self.velocity_label, self.velocity_spinbox)
+        
+        options_layout.addLayout(params_layout)
+        
+        # 右侧复选框设置
+        checkboxes_layout = QVBoxLayout()
+        checkboxes_layout.setContentsMargins(20, 0, 0, 0)
+        
+        # 去除控制消息复选框
+        self.remove_cc_checkbox = QCheckBox("移除控制消息")
         self.remove_cc_checkbox.setChecked(True)
+        self.remove_cc_checkbox.setToolTip("移除所有CC控制消息")
+        checkboxes_layout.addWidget(self.remove_cc_checkbox)
+
+        # 统一力度复选框
         self.set_velocity_checkbox = QCheckBox("统一音符力度")
         self.set_velocity_checkbox.setChecked(True)
-        options_layout.addWidget(self.remove_cc_checkbox)
-        options_layout.addWidget(self.set_velocity_checkbox)
-        input_layout.addRow("选项:", options_layout)
+        self.set_velocity_checkbox.setToolTip("统一所有音符的力度值")
+        checkboxes_layout.addWidget(self.set_velocity_checkbox)
         
-        # 添加力度百分比选择
-        velocity_layout = QHBoxLayout()
-        self.velocity_edit = QLineEdit("80")
-        self.velocity_edit.setValidator(QIntValidator(1, 100))
-        self.velocity_edit.setMaximumWidth(50)
-        velocity_layout.addWidget(self.velocity_edit)
-        velocity_layout.addWidget(QLabel("%"))
-        velocity_layout.addStretch()
-        input_layout.addRow("力度百分比:", velocity_layout)
+        # 跳过匹配文件复选框
+        self.skip_matched_checkbox = QCheckBox("跳过匹配文件")
+        self.skip_matched_checkbox.setChecked(True)
+        self.skip_matched_checkbox.setToolTip("如果MIDI文件已经符合设置条件则跳过处理")
+        checkboxes_layout.addWidget(self.skip_matched_checkbox)
         
-        input_group.setLayout(input_layout)
-        main_layout.addWidget(input_group)
+        options_layout.addLayout(checkboxes_layout)
+        
+        file_layout.addRow("选项:", options_widget)
+        
+        main_layout.addWidget(file_widget)
         
         # 添加进度条
         self.progress_bar = QProgressBar()
@@ -218,22 +255,44 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(0)
         main_layout.addWidget(self.progress_bar)
         
+        # 操作按钮布局
+        button_layout = QHBoxLayout()
+        
         # 添加开始按钮
         self.start_button = QPushButton("开始处理")
         self.start_button.clicked.connect(self.start_processing)
-        main_layout.addWidget(self.start_button)
+        button_layout.addWidget(self.start_button)
         
-        # 创建分割器，分别显示表格和日志
-        splitter = QSplitter(Qt.Vertical)
+        # 添加导出按钮
+        self.export_button = QPushButton("导出结果")
+        self.export_button.clicked.connect(self.export_results)
+        self.export_button.setEnabled(False)  # 初始状态禁用
+        button_layout.addWidget(self.export_button)
+        
+        main_layout.addLayout(button_layout)
+        
+        # 创建选项卡部件，包含结果表格和日志
+        self.tabs = QTabWidget()
+        
+        # 结果表格选项卡
+        results_widget = QWidget()
+        results_layout = QVBoxLayout(results_widget)
         
         # 创建表格显示处理结果
-        self.result_table = QTableWidget(0, 6)
+        self.result_table = QTableWidget(0, 6)  # 修改为6列，移除输出路径列
         self.result_table.setHorizontalHeaderLabels([
-            "文件名", "原始速度(BPM)", "目标速度(BPM)", "音符力度", "删除CC控制", "状态"
+            "文件名", "原始速度", "目标速度", "音符力度", "删除控制信息", "状态"
         ])
         self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.result_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)  # 文件名列自适应
         self.result_table.setAlternatingRowColors(True)
-        splitter.addWidget(self.result_table)
+        results_layout.addWidget(self.result_table)
+        
+        self.tabs.addTab(results_widget, "处理结果")
+        
+        # 日志选项卡
+        log_widget = QWidget()
+        log_layout = QVBoxLayout(log_widget)
         
         # 添加日志显示框
         self.log_edit = QTextEdit()
@@ -242,12 +301,11 @@ class MainWindow(QMainWindow):
         font = QFont("Consolas", 9)
         self.log_edit.setFont(font)
         self.log_edit.setStyleSheet("background-color: #f0f0f0;")
-        splitter.addWidget(self.log_edit)
+        log_layout.addWidget(self.log_edit)
         
-        # 设置分割器初始大小
-        splitter.setSizes([300, 200])
+        self.tabs.addTab(log_widget, "运行日志")
         
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(self.tabs)
         
         # 设置中心部件
         self.setCentralWidget(central_widget)
@@ -271,7 +329,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "错误", "未找到有效的MIDI文件")
                 self.input_dir_edit.clear()
                 return
-            
+                
             # 设置文件列表和目录
             self.midi_files = midi_files
             
@@ -284,7 +342,7 @@ class MainWindow(QMainWindow):
                 self.input_dir_edit.setText(f"已选择: {os.path.basename(midi_files[0])}")
             else:
                 self.input_dir_edit.setText(f"已选择 {len(midi_files)} 个MIDI文件")
-
+    
     def set_output_directory(self, paths):
         if paths and os.path.isdir(paths[0]):
             self.output_directory = paths[0]
@@ -299,11 +357,6 @@ class MainWindow(QMainWindow):
             self.input_directory = directory
             self.input_dir_edit.setText(directory)
             self.midi_files = []  # 清空文件列表，使用目录模式
-            
-            # 如果还没有设置输出目录，将其设置为输入目录下的"处理结果"子目录
-            if not self.output_directory:
-                self.output_directory = os.path.join(directory, "处理结果")
-                self.output_dir_edit.setText(self.output_directory)
     
     def browse_output_directory(self):
         directory = QFileDialog.getExistingDirectory(self, "选择输出目录")
@@ -312,27 +365,24 @@ class MainWindow(QMainWindow):
             self.output_dir_edit.setText(directory)
     
     def start_processing(self):
-        # 验证输入
-        if not self.midi_files and not self.input_directory:
-            QMessageBox.warning(self, "错误", "请选择MIDI文件或目录")
+        """开始处理所有文件"""
+        if not self.midi_files:
+            QMessageBox.warning(self, "警告", "请先添加MIDI文件")
             return
-        
+
         if not self.output_directory:
-            QMessageBox.warning(self, "错误", "请选择输出目录")
+            QMessageBox.warning(self, "警告", "请先选择输出目录")
             return
-        
-        try:
-            target_bpm = int(self.target_bpm_edit.text())
-            if target_bpm <= 0:
-                raise ValueError("BPM必须大于0")
-            
-            # 验证力度百分比
-            velocity_percent = int(self.velocity_edit.text())
-            if velocity_percent <= 0 or velocity_percent > 100:
-                raise ValueError("力度百分比必须在1-100之间")
-        except ValueError as e:
-            QMessageBox.warning(self, "错误", str(e))
-            return
+
+        # 获取处理参数
+        target_bpm = self.target_bpm_spinbox.value()
+        remove_cc = self.remove_cc_checkbox.isChecked()
+        set_velocity = self.set_velocity_checkbox.isChecked()
+        velocity_percent = self.velocity_spinbox.value()
+        skip_matched = self.skip_matched_checkbox.isChecked()
+
+        # 切换到结果选项卡
+        self.tabs.setCurrentIndex(0)
         
         # 清空结果表格和日志
         self.result_table.setRowCount(0)
@@ -349,9 +399,10 @@ class MainWindow(QMainWindow):
             input_dir=self.input_directory,
             output_dir=self.output_directory,
             target_bpm=target_bpm,
-            remove_cc=self.remove_cc_checkbox.isChecked(),
-            set_velocity=self.set_velocity_checkbox.isChecked(),
-            velocity_percent=velocity_percent
+            remove_cc=remove_cc,
+            set_velocity=set_velocity,
+            velocity_percent=velocity_percent,
+            skip_matched=skip_matched
         )
         
         # 连接信号
@@ -363,6 +414,7 @@ class MainWindow(QMainWindow):
         # 禁用界面元素
         self.start_button.setEnabled(False)
         self.start_button.setText("处理中...")
+        self.export_button.setEnabled(False)
         
         # 启动线程
         self.worker.start()
@@ -383,7 +435,7 @@ class MainWindow(QMainWindow):
         # 填充表格数据
         self.result_table.setItem(row, 0, QTableWidgetItem(result["filename"]))
         
-        # 显示所有原始速度
+        # 显示原始速度 - 优化多速度显示格式
         if "tempo_changes" in result and result["tempo_changes"]:
             tempos = []
             for tempo_info in result["tempo_changes"]:
@@ -392,36 +444,47 @@ class MainWindow(QMainWindow):
                     tempos.append(f"{bpm:.1f}")
             
             if tempos:
-                tempo_text = ", ".join(tempos) + " BPM"
+                if len(tempos) > 1:
+                    # 如果有多个速度，使用格式: "120.0→140.0→90.5"
+                    tempo_text = " → ".join(tempos) + " BPM"
+                else:
+                    tempo_text = tempos[0] + " BPM"
             else:
                 tempo_text = str(result["original_bpm"]) + " BPM"
         else:
             tempo_text = str(result["original_bpm"]) + " BPM"
-        
+            
         self.result_table.setItem(row, 1, QTableWidgetItem(tempo_text))
         
-        self.result_table.setItem(row, 2, QTableWidgetItem(str(result["target_bpm"])))
+        # 目标速度
+        self.result_table.setItem(row, 2, QTableWidgetItem(str(result["target_bpm"]) + " BPM"))
         
-        # 根据实际设置显示力度和CC状态
-        if result["velocity_modified"]:
-            # 显示百分比和实际MIDI值
-            percent = self.velocity_edit.text()
-            midi_value = min(127, max(1, int(127 * int(percent) / 100)))
-            self.result_table.setItem(row, 3, QTableWidgetItem(f"{percent}% ({midi_value})"))
+        # 音符力度状态
+        if "velocity_status" in result:
+            velocity_status = result["velocity_status"]
         else:
-            self.result_table.setItem(row, 3, QTableWidgetItem("原始"))
+            velocity_status = "已处理" if result["velocity_modified"] else "未处理"
+        self.result_table.setItem(row, 3, QTableWidgetItem(velocity_status))
         
-        self.result_table.setItem(row, 4, QTableWidgetItem("是" if result["cc_removed"] else "否"))
-        self.result_table.setItem(row, 5, QTableWidgetItem(result["status"]))
+        # CC状态
+        if "cc_status" in result:
+            cc_status = result["cc_status"]
+        else:
+            cc_status = "已处理" if result["cc_removed"] else "未处理"
+        self.result_table.setItem(row, 4, QTableWidgetItem(cc_status))
+        
+        # 处理状态
+        status_item = QTableWidgetItem(result["status"])
+        self.result_table.setItem(row, 5, status_item)
         
         # 设置状态单元格的颜色
-        status_item = self.result_table.item(row, 5)
         if "错误" in result["status"]:
             status_item.setBackground(Qt.red)
             status_item.setForeground(Qt.white)
-        else:
+        elif result["status"] == "成功":
             status_item.setBackground(Qt.green)
             status_item.setForeground(Qt.black)
+        # 对于"无需处理"状态，不设置颜色
         
         # 滚动到最新的行
         self.result_table.scrollToBottom()
@@ -437,6 +500,10 @@ class MainWindow(QMainWindow):
         self.start_button.setEnabled(True)
         self.start_button.setText("开始处理")
         
+        # 启用导出按钮(如果有处理结果)
+        if self.processed_results:
+            self.export_button.setEnabled(True)
+        
         # 添加完成日志
         self.log_edit.append("===== 处理完成 =====")
         
@@ -445,4 +512,94 @@ class MainWindow(QMainWindow):
         
         # 打开输出目录
         if os.path.exists(self.output_directory):
-            os.startfile(self.output_directory)  # 仅适用于Windows 
+            try:
+                os.startfile(self.output_directory)  # 仅适用于Windows
+            except:
+                pass
+    
+    def export_results(self):
+        """导出处理结果到Excel文件"""
+        if not self.processed_results:
+            QMessageBox.warning(self, "错误", "没有可导出的处理结果")
+            return
+            
+        if not EXCEL_EXPORT_AVAILABLE:
+            QMessageBox.warning(self, "错误", "导出Excel功能需要安装pandas库")
+            return
+            
+        try:
+            # 创建一个默认的文件名
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            default_file = os.path.join(
+                self.output_directory, 
+                f"MIDI处理结果_{timestamp}.xlsx"
+            )
+            
+            # 让用户选择保存位置
+            export_path, _ = QFileDialog.getSaveFileName(
+                self, "导出结果", 
+                default_file,
+                "Excel Files (*.xlsx);;All Files (*)"
+            )
+            
+            if not export_path:
+                return
+                
+            # 准备数据
+            data = []
+            for result in self.processed_results:
+                # 获取原始速度字符串
+                if "tempo_changes" in result and result["tempo_changes"]:
+                    tempos = []
+                    for tempo_info in result["tempo_changes"]:
+                        bpm = tempo_info["bpm"]
+                        if isinstance(bpm, (int, float)):
+                            tempos.append(f"{bpm:.1f}")
+                    
+                    if tempos:
+                        if len(tempos) > 1:
+                            tempo_text = " → ".join(tempos) + " BPM"
+                        else:
+                            tempo_text = tempos[0] + " BPM"
+                    else:
+                        tempo_text = str(result["original_bpm"]) + " BPM"
+                else:
+                    tempo_text = str(result["original_bpm"]) + " BPM"
+                
+                # 获取音符力度状态
+                if "velocity_status" in result:
+                    velocity_status = result["velocity_status"]
+                else:
+                    velocity_status = "已处理" if result["velocity_modified"] else "未处理"
+                
+                # 获取CC状态
+                if "cc_status" in result:
+                    cc_status = result["cc_status"]
+                else:
+                    cc_status = "已处理" if result["cc_removed"] else "未处理"
+                
+                data.append({
+                    "文件名": result["filename"],
+                    "原始速度": tempo_text,
+                    "目标速度": str(result["target_bpm"]) + " BPM",
+                    "音符力度": velocity_status,
+                    "删除控制信息": cc_status,
+                    "状态": result["status"],
+                    "文件路径": result["path"],
+                    "音符数量": result["note_count"]
+                })
+            
+            # 创建DataFrame并导出
+            df = pd.DataFrame(data)
+            df.to_excel(export_path, index=False)
+            
+            QMessageBox.information(self, "导出成功", f"处理结果已成功导出到:\n{export_path}")
+            
+            # 尝试打开导出的文件
+            try:
+                os.startfile(export_path)
+            except:
+                pass
+                
+        except Exception as e:
+            QMessageBox.warning(self, "导出错误", f"导出Excel时出错: {str(e)}") 
