@@ -59,12 +59,26 @@ class MidiProcessor:
 
             # 检查是否需要处理
             needs_processing = True
-            cc_status = "已处理"  # 默认状态
-            velocity_status = "已处理"  # 默认状态
+            cc_status = "已处理" if remove_cc else "未处理"  # 默认状态基于选项
+            velocity_status = "已处理" if set_velocity else "未处理"  # 默认状态基于选项
             
-            # 检查原始BPM是否与目标BPM一致
+            # 检查MIDI是否为变速（有多个不同的速度变化）
+            has_multiple_tempos = False
+            if len(self.tempo_changes) > 1:
+                # 获取所有不同的速度值
+                unique_tempos = set(tempo for _, tempo in self.tempo_changes)
+                has_multiple_tempos = len(unique_tempos) > 1
+                
+            # 检查原始BPM是否与目标BPM一致（仅对非变速MIDI进行检查）
             original_bpm = self._tempo_to_bpm(self.original_tempo) if self.original_tempo else 120
-            bpm_matches = abs(original_bpm - target_bpm) < 0.1  # 允许0.1的误差
+            bpm_matches = False
+            
+            # 只有当MIDI有且仅有一个速度信息，且该速度与目标速度一致时，才认为BPM匹配
+            if not has_multiple_tempos:
+                bpm_matches = abs(original_bpm - target_bpm) < 0.1  # 允许0.1的误差
+            else:
+                # 变速MIDI始终需要处理
+                bpm_matches = False
             
             # 检查文件是否包含任何控制消息
             has_cc_messages = False
@@ -97,77 +111,87 @@ class MidiProcessor:
                 # 1. 已勾选移除控制消息，但MIDI内不含控制信息
                 if remove_cc and not has_cc_messages:
                     cc_status = "无需处理"
-                    # 无论是否勾选统一音符力度，都不处理MIDI
-                    needs_processing = False
-                    
-                    # 设置音符力度状态
-                    if set_velocity:
-                        if all_notes_match_velocity:
-                            velocity_status = "无需处理"
-                        else:
-                            velocity_status = "未处理"  # 音符力度不匹配但不处理
-                    else:
-                        velocity_status = "未选择"
                 
-                # 2. 未勾选移除控制消息
-                elif not remove_cc:
-                    cc_status = "未选择"
-                    if set_velocity:
-                        if all_notes_match_velocity:
-                            velocity_status = "无需处理"
-                            needs_processing = False  # 如果BPM相同、不删除CC且力度已匹配，则不需要处理
-                        else:
-                            velocity_status = "已处理"
-                    else:
-                        velocity_status = "未选择"
-                        needs_processing = False  # 如果BPM相同且不做任何处理，则不需要处理
-                
-                # 3. 已勾选移除控制消息，且MIDI内包含控制消息需要移除
-                else:  # remove_cc and has_cc_messages
+                # 2. 勾选了移除控制消息，且MIDI内包含控制消息需要移除
+                elif remove_cc and has_cc_messages:
                     cc_status = "已处理"
-                    if set_velocity:
-                        if all_notes_match_velocity:
-                            velocity_status = "无需处理"
-                        else:
-                            velocity_status = "已处理"
+                
+                # 3. 未勾选移除控制消息
+                else:  # not remove_cc
+                    cc_status = "未处理"
+                    
+                # 设置音符力度状态
+                if set_velocity:
+                    if all_notes_match_velocity:
+                        velocity_status = "无需处理"
                     else:
-                        velocity_status = "未选择"
-            
-            # 如果不需要处理，直接返回结果
-            if not needs_processing and skip_matched:
-                print(f"文件不需要处理: BPM已匹配, CC状态: {cc_status}, 力度状态: {velocity_status}")
-                # 收集所有原始音符的绝对秒位置(仅用于信息返回)
-                note_positions = self._collect_note_positions(midi)
+                        velocity_status = "已处理"
+                else:
+                    velocity_status = "未处理"
                 
-                # 准备输出路径(即使不处理，也提供给用户)
-                filename = os.path.basename(input_file)
-                output_path = os.path.join(output_dir, filename)
-                
-                # 返回处理结果信息
-                tempo_info = []
-                for idx, (time_ticks, tempo, time_seconds, measure_beat) in enumerate(self.detailed_tempos):
-                    tempo_info.append({
-                        "id": idx + 1,
-                        "time_ticks": time_ticks,
-                        "time_seconds": time_seconds,
-                        "measure_beat": measure_beat,
-                        "tempo": tempo,
-                        "bpm": self._tempo_to_bpm(tempo)
-                    })
-                
-                return {
-                    "filename": filename,
-                    "original_bpm": self._tempo_to_bpm(self.original_tempo) if self.original_tempo else "未知",
-                    "target_bpm": target_bpm,
-                    "velocity_modified": set_velocity,
-                    "velocity_status": velocity_status,
-                    "cc_removed": remove_cc,
-                    "cc_status": cc_status,
-                    "tempo_changes": tempo_info,
-                    "note_count": len(note_positions),
-                    "status": "无需处理",
-                    "path": output_path
-                }
+                # 如果BPM匹配且勾选了跳过匹配文件，则检查是否需要处理控制信息
+                if skip_matched:
+                    # 检查是否需要处理控制信息（有控制信息且选择了移除控制信息）
+                    needs_cc_processing = remove_cc and has_cc_messages
+                    
+                    # 只有当不需要处理控制信息时，才跳过处理
+                    if not needs_cc_processing:
+                        print(f"文件不需要处理: BPM已匹配 ({original_bpm} BPM), 无控制信息需移除")
+                        
+                        # 收集所有原始音符的绝对秒位置(仅用于信息返回)
+                        note_positions = self._collect_note_positions(midi)
+                        
+                        # 准备输出路径(即使不处理，也提供给用户)
+                        filename = os.path.basename(input_file)
+                        output_path = os.path.join(output_dir, filename)
+                        
+                        # 返回处理结果信息
+                        tempo_info = []
+                        for idx, (time_ticks, tempo, time_seconds, measure_beat) in enumerate(self.detailed_tempos):
+                            tempo_info.append({
+                                "id": idx + 1,
+                                "time_ticks": time_ticks,
+                                "time_seconds": time_seconds,
+                                "measure_beat": measure_beat,
+                                "tempo": tempo,
+                                "bpm": self._tempo_to_bpm(tempo)
+                            })
+                        
+                        # 设置正确的状态文本
+                        # 音符力度状态：如果选中了统一音符力度，且力度不一致，则为"未处理"（表示需要处理但未处理）
+                        if set_velocity:
+                            if all_notes_match_velocity:
+                                velocity_status = "无需处理"  # 音符力度已经一致
+                            else:
+                                velocity_status = "未处理"  # 需要处理但因为跳过匹配文件而未处理
+                        else:
+                            velocity_status = "未处理"  # 未选择统一力度
+                        
+                        # 控制信息状态：根据是否有控制信息决定
+                        if remove_cc:
+                            if has_cc_messages:
+                                cc_status = "未处理"  # 有控制信息，但因为跳过匹配文件而未处理
+                            else:
+                                cc_status = "无需处理"  # 没有控制信息需要移除
+                        else:
+                            cc_status = "未处理"  # 未选择移除控制信息
+                        
+                        return {
+                            "filename": filename,
+                            "original_bpm": self._tempo_to_bpm(self.original_tempo) if self.original_tempo else "未知",
+                            "target_bpm": target_bpm,
+                            "velocity_modified": set_velocity,
+                            "velocity_status": velocity_status,
+                            "cc_removed": remove_cc,
+                            "cc_status": cc_status,
+                            "tempo_changes": tempo_info,
+                            "note_count": len(note_positions),
+                            "status": "无需处理",
+                            "path": output_path,
+                            "is_multi_tempo": has_multiple_tempos
+                        }
+                    else:
+                        print(f"BPM匹配但需要移除控制信息，继续处理: {input_file}")
             
             # 收集所有原始音符的绝对秒位置
             print("\n===== 收集原始音符位置 =====")
@@ -210,7 +234,8 @@ class MidiProcessor:
                 "tempo_changes": tempo_info,
                 "note_count": len(note_positions),
                 "status": "成功",
-                "path": output_path
+                "path": output_path,
+                "is_multi_tempo": has_multiple_tempos
             }
             
         except Exception as e:
@@ -228,7 +253,8 @@ class MidiProcessor:
                 "tempo_changes": [],
                 "note_count": 0,
                 "status": f"错误: {str(e)}",
-                "path": ""
+                "path": "",
+                "is_multi_tempo": False
             }
     
     def _create_timestamp_midi(self, ticks_per_beat: int) -> mido.MidiFile:
@@ -751,7 +777,8 @@ class MidiProcessor:
                          target_bpm: int = 120, 
                          remove_cc: bool = True, 
                          set_velocity: bool = True,
-                         velocity_percent: int = 80) -> List[Dict[str, Any]]:
+                         velocity_percent: int = 80,
+                         skip_matched: bool = True) -> List[Dict[str, Any]]:
         """
         批量处理目录中的所有MIDI文件
         
@@ -762,6 +789,7 @@ class MidiProcessor:
             remove_cc: 是否删除控制消息
             set_velocity: 是否设置固定力度
             velocity_percent: 力度百分比(1-127)
+            skip_matched: 如果文件已匹配条件则跳过处理
             
         Returns:
             包含所有处理结果的列表
@@ -792,7 +820,8 @@ class MidiProcessor:
                         target_bpm, 
                         remove_cc, 
                         set_velocity,
-                        velocity_percent
+                        velocity_percent,
+                        skip_matched
                     )
                     results.append(result)
         

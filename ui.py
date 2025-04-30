@@ -72,7 +72,8 @@ class WorkerThread(QThread):
                         self.target_bpm, 
                         self.remove_cc, 
                         self.set_velocity,
-                        self.velocity_percent
+                        self.velocity_percent,
+                        self.skip_matched
                     )
                     
                     # 发送进度和结果信号
@@ -91,7 +92,8 @@ class WorkerThread(QThread):
                     self.target_bpm,
                     self.remove_cc,
                     self.set_velocity,
-                    self.velocity_percent
+                    self.velocity_percent,
+                    self.skip_matched
                 )
                 
                 # 发送进度和结果信号
@@ -444,11 +446,15 @@ class MainWindow(QMainWindow):
                     tempos.append(f"{bpm:.1f}")
             
             if tempos:
+                # 检查是否为变速MIDI
+                is_multi_tempo = result.get("is_multi_tempo", False)
+                prefix = "[变速] " if is_multi_tempo else ""
+                
                 if len(tempos) > 1:
                     # 如果有多个速度，使用格式: "120.0→140.0→90.5"
-                    tempo_text = " → ".join(tempos) + " BPM"
+                    tempo_text = prefix + " → ".join(tempos) + " BPM"
                 else:
-                    tempo_text = tempos[0] + " BPM"
+                    tempo_text = prefix + tempos[0] + " BPM"
             else:
                 tempo_text = str(result["original_bpm"]) + " BPM"
         else:
@@ -557,10 +563,14 @@ class MainWindow(QMainWindow):
                             tempos.append(f"{bpm:.1f}")
                     
                     if tempos:
+                        # 检查是否为变速MIDI
+                        is_multi_tempo = result.get("is_multi_tempo", False)
+                        prefix = "[变速] " if is_multi_tempo else ""
+                        
                         if len(tempos) > 1:
-                            tempo_text = " → ".join(tempos) + " BPM"
+                            tempo_text = prefix + " → ".join(tempos) + " BPM"
                         else:
-                            tempo_text = tempos[0] + " BPM"
+                            tempo_text = prefix + tempos[0] + " BPM"
                     else:
                         tempo_text = str(result["original_bpm"]) + " BPM"
                 else:
