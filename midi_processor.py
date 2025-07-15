@@ -395,8 +395,7 @@ class MidiProcessor:
             if i == 0:
                 new_track.append(mido.MetaMessage('set_tempo', tempo=target_tempo, time=0))
         
-        # 复制除了音符和控制器之外的所有事件到新的轨道
-        # 先收集每个轨道的所有非音符事件
+        # 先收集每个轨道的所有事件
         track_events = [[] for _ in range(len(orig_midi.tracks))]
         
         for track_idx, track in enumerate(orig_midi.tracks):
@@ -404,7 +403,7 @@ class MidiProcessor:
             for msg in track:
                 absolute_ticks += msg.time
                 
-                # 跳过音符事件
+                # 跳过音符事件（这些会通过note_positions重新添加）
                 if msg.type in ['note_on', 'note_off']:
                     continue
                     
@@ -421,14 +420,30 @@ class MidiProcessor:
                 if msg.type in ['marker', 'text', 'cue_marker', 'lyrics']:
                     continue
                 
-                # 保存其他事件和它们的绝对tick位置
-                track_events[track_idx].append({
-                    'msg': msg,
-                    'absolute_ticks': absolute_ticks,
-                    'absolute_seconds': self._calculate_absolute_time_with_tempo_changes(
-                        absolute_ticks, self.tempo_changes, orig_midi.ticks_per_beat
-                    )
-                })
+                # 计算事件的绝对秒位置
+                absolute_seconds = self._calculate_absolute_time_with_tempo_changes(
+                    absolute_ticks, self.tempo_changes, orig_midi.ticks_per_beat
+                )
+                
+                # 对于CC控制信息，需要转换时间位置到新的速度
+                if not remove_cc and msg.type in ['control_change', 'pitchwheel', 'program_change', 
+                                                'aftertouch', 'polytouch', 'sysex']:
+                    # 计算新的tick位置
+                    new_ticks = self._seconds_to_ticks_precise(absolute_seconds, target_tempo, orig_midi.ticks_per_beat)
+                    
+                    # 保存控制事件和转换后的时间位置
+                    track_events[track_idx].append({
+                        'msg': msg,
+                        'absolute_ticks': new_ticks,
+                        'absolute_seconds': absolute_seconds
+                    })
+                else:
+                    # 对于其他事件，保持原始时间位置
+                    track_events[track_idx].append({
+                        'msg': msg,
+                        'absolute_ticks': absolute_ticks,
+                        'absolute_seconds': absolute_seconds
+                    })
         
         # 按轨道处理所有音符
         for note in note_positions:

@@ -230,7 +230,7 @@ class MainWindow(QMainWindow):
         # 去除控制消息复选框
         self.remove_cc_checkbox = QCheckBox("移除控制消息")
         self.remove_cc_checkbox.setChecked(True)
-        self.remove_cc_checkbox.setToolTip("移除所有CC控制消息")
+        self.remove_cc_checkbox.setToolTip("移除所有CC控制消息（如延音踏板、弯音等）。取消勾选时，控制信息的时间位置会随速度变化同步调整")
         checkboxes_layout.addWidget(self.remove_cc_checkbox)
 
         # 统一力度复选框
