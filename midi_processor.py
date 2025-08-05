@@ -15,7 +15,7 @@ class MidiProcessor:
     def process_file(self, 
                     input_file: str, 
                     output_dir: str, 
-                    target_bpm: int = 120, 
+                    target_bpm: float = 120.0, 
                     remove_cc: bool = True, 
                     set_velocity: bool = True,
                     velocity_percent: int = 80,
@@ -362,7 +362,7 @@ class MidiProcessor:
     def _create_new_midi_with_exact_timing(self, 
                                         orig_midi: mido.MidiFile, 
                                         note_positions: List[Dict[str, Any]],
-                                        target_bpm: int,
+                                        target_bpm: float,
                                         remove_cc: bool,
                                         set_velocity: bool) -> mido.MidiFile:
         """
@@ -789,7 +789,7 @@ class MidiProcessor:
     def process_directory(self, 
                          input_dir: str, 
                          output_dir: str, 
-                         target_bpm: int = 120, 
+                         target_bpm: float = 120.0, 
                          remove_cc: bool = True, 
                          set_velocity: bool = True,
                          velocity_percent: int = 80,

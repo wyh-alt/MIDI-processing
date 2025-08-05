@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                            QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar, 
                            QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, 
                            QMessageBox, QGroupBox, QFormLayout, QTextEdit, QSplitter,
-                           QTabWidget, QDialog, QSpinBox)
+                           QTabWidget, QDialog, QSpinBox, QDoubleSpinBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFont, QIntValidator
 
@@ -26,7 +26,7 @@ class WorkerThread(QThread):
     finished = pyqtSignal()                 # 处理完成信号
     
     def __init__(self, processor, files=None, input_dir=None, output_dir=None, 
-                target_bpm=120, remove_cc=True, set_velocity=True, velocity_percent=80,
+                target_bpm=120.0, remove_cc=True, set_velocity=True, velocity_percent=80,
                 skip_matched=True):
         super().__init__()
         self.processor = processor
@@ -207,9 +207,11 @@ class MainWindow(QMainWindow):
         # BPM设置
         bpm_layout = QHBoxLayout()
         self.target_bpm_label = QLabel("目标BPM:")
-        self.target_bpm_spinbox = QSpinBox()
-        self.target_bpm_spinbox.setRange(1, 999)
-        self.target_bpm_spinbox.setValue(120)
+        self.target_bpm_spinbox = QDoubleSpinBox()
+        self.target_bpm_spinbox.setRange(1.0, 999.99)
+        self.target_bpm_spinbox.setDecimals(2)
+        self.target_bpm_spinbox.setValue(120.0)
+        self.target_bpm_spinbox.setSuffix(" BPM")
         bpm_layout.addWidget(self.target_bpm_spinbox)
         params_layout.addRow(self.target_bpm_label, self.target_bpm_spinbox)
         
@@ -463,7 +465,8 @@ class MainWindow(QMainWindow):
         self.result_table.setItem(row, 1, QTableWidgetItem(tempo_text))
         
         # 目标速度
-        self.result_table.setItem(row, 2, QTableWidgetItem(str(result["target_bpm"]) + " BPM"))
+        target_bpm_str = f"{result['target_bpm']:.2f}" if isinstance(result['target_bpm'], (int, float)) else str(result['target_bpm'])
+        self.result_table.setItem(row, 2, QTableWidgetItem(target_bpm_str + " BPM"))
         
         # 音符力度状态
         if "velocity_status" in result:
@@ -591,7 +594,7 @@ class MainWindow(QMainWindow):
                 data.append({
                     "文件名": result["filename"],
                     "原始速度": tempo_text,
-                    "目标速度": str(result["target_bpm"]) + " BPM",
+                    "目标速度": f"{result['target_bpm']:.2f} BPM" if isinstance(result['target_bpm'], (int, float)) else str(result['target_bpm']) + " BPM",
                     "音符力度": velocity_status,
                     "删除控制信息": cc_status,
                     "状态": result["status"],
