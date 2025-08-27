@@ -1,8 +1,4 @@
-# 🎵 MIDI处理整合工具
-
-[![Python](https://img.shields.io/badge/python-3.6%2B-blue.svg)](https://python.org)
-[![PyQt5](https://img.shields.io/badge/GUI-PyQt5-green.svg)](https://pypi.org/project/PyQt5/)
-[![MIDI](https://img.shields.io/badge/format-MIDI-orange.svg)](https://midi.org)
+# 🎵 MIDI处理工具
 
 一个功能强大的MIDI文件处理工具，集成了MIDI速度转换、音符重叠检测与修复、批量处理等功能。专为音乐制作人、编曲师和MIDI文件编辑者设计，提供专业级的MIDI文件处理能力。
 
@@ -76,8 +72,7 @@ MIDI处理整合/
 ### 安装依赖
 ```bash
 # 克隆项目
-git clone https://github.com/your-username/MIDI处理整合.git
-cd MIDI处理整合/MIDI速度转换
+git clone https://github.com/wyh-alt/MIDI-processing.git
 
 # 安装依赖
 pip install -r requirements.txt
@@ -231,41 +226,9 @@ pip install --upgrade -r requirements.txt
 2. **谨慎使用跨轨道处理** - 仅在确实需要时启用全局模式
 3. **检查处理结果** - 重叠处理后验证音乐的完整性
 
-## 🔄 更新日志
-
-### v2.1.0 (Latest)
-- ✨ 完善跨轨道重叠处理独立性，不受跳过匹配文件影响
-- 🔧 修复多轨重叠显示颜色与单轨不一致的问题
-- 📊 增强结果显示，支持更多类型的重叠状态显示
-- 🚀 优化文件输出逻辑，仅重叠检测时不输出文件
-- 📝 重新编写README文档，提供更准确的功能说明
-
-### v2.0.0
-- ✨ 新增多轨道智能重叠检测和处理
-- ✨ 实现跳过匹配文件时的独立重叠处理
-- 🔧 优化音符配对算法，修复FIFO配对问题
-- 🎨 改进UI界面，增加状态颜色编码
-- 📊 增强结果显示，支持详细重叠信息
-
-### v1.5.0
-- ✨ 增加音符重叠检测功能
-- 🔧 改进MIDI速度转换精度
-- 🎨 优化用户界面体验
-
-### v1.0.0
-- 🎉 首次发布
-- ✨ 基础MIDI速度转换功能
-- 📁 批量处理支持
-
-## 🤝 贡献指南
 
 欢迎提交Issue和Pull Request！
 
-### 开发环境设置
-```
-# 克隆项目
-git clone https://github.com/your-username/MIDI处理整合.git
-cd MIDI处理整合/MIDI速度转换
 
 # 安装依赖
 pip install -r requirements.txt
@@ -279,25 +242,4 @@ python main.py
 - 保证代码质量和可读性
 - 更新相关文档
 
-## 📞 支持与反馈
 
-- **问题报告**: [GitHub Issues](https://github.com/your-username/MIDI处理整合/issues)
-- **功能建议**: [GitHub Discussions](https://github.com/your-username/MIDI处理整合/discussions)
-
-## 🙏 致谢
-
-感谢以下开源项目：
-- [python-mido](https://github.com/mido/mido) - MIDI文件处理
-- [PyQt5](https://www.riverbankcomputing.com/software/pyqt/) - 图形界面框架
-- [python-rtmidi](https://github.com/patrickkidd/python-rtmidi) - MIDI实时传输
-- [pandas](https://pandas.pydata.org/) - 数据处理与导出
-
----
-
-<div align="center">
-
-**[⬆ 回到顶部](#-midi处理整合工具)**
-
-为音乐制作人和音频产业从业者打造 ❤️
-
-</div>
