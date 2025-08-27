@@ -1,12 +1,21 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all
+
+datas = []
+binaries = []
+hiddenimports = ['mido.backends.rtmidi', 'mido.backends.portmidi', 'PyQt5.QtPrintSupport']
+hiddenimports += collect_submodules('PyQt5')
+tmp_ret = collect_all('mido')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
-    datas=[],
-    hiddenimports=['mido.backends.rtmidi'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -22,7 +31,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MIDI速度转换工具',
+    name='MIDI处理整合工具',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

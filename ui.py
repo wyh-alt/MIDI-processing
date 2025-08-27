@@ -5,9 +5,9 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                            QLabel, QLineEdit, QPushButton, QFileDialog, QProgressBar, 
                            QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, 
                            QMessageBox, QGroupBox, QFormLayout, QTextEdit, QSplitter,
-                           QTabWidget, QDialog, QSpinBox, QDoubleSpinBox)
+                           QTabWidget, QDialog, QSpinBox, QDoubleSpinBox, QScrollArea)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
-from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFont, QIntValidator
+from PyQt5.QtGui import QDragEnterEvent, QDropEvent, QFont, QIntValidator, QIcon
 
 from midi_processor import MidiProcessor
 
@@ -27,7 +27,8 @@ class WorkerThread(QThread):
     
     def __init__(self, processor, files=None, input_dir=None, output_dir=None, 
                 target_bpm=120.0, remove_cc=True, set_velocity=True, velocity_percent=80,
-                skip_matched=True):
+                skip_matched=True, keep_original_tempo=False, check_overlap=False, fix_overlap=False,
+                multitrack_overlap=False):
         super().__init__()
         self.processor = processor
         self.files = files or []
@@ -38,6 +39,10 @@ class WorkerThread(QThread):
         self.set_velocity = set_velocity
         self.velocity_percent = velocity_percent
         self.skip_matched = skip_matched
+        self.keep_original_tempo = keep_original_tempo
+        self.check_overlap = check_overlap
+        self.fix_overlap = fix_overlap
+        self.multitrack_overlap = multitrack_overlap
         
         # 重定向标准输出
         self.old_stdout = sys.stdout
@@ -73,7 +78,11 @@ class WorkerThread(QThread):
                         self.remove_cc, 
                         self.set_velocity,
                         self.velocity_percent,
-                        self.skip_matched
+                        self.skip_matched,
+                        self.keep_original_tempo,
+                        self.check_overlap,
+                        self.fix_overlap,
+                        self.multitrack_overlap
                     )
                     
                     # 发送进度和结果信号
@@ -93,7 +102,11 @@ class WorkerThread(QThread):
                     self.remove_cc,
                     self.set_velocity,
                     self.velocity_percent,
-                    self.skip_matched
+                    self.skip_matched,
+                    self.keep_original_tempo,
+                    self.check_overlap,
+                    self.fix_overlap,
+                    self.multitrack_overlap
                 )
                 
                 # 发送进度和结果信号
@@ -147,8 +160,13 @@ class MainWindow(QMainWindow):
         super().__init__()
         
         # 设置基本窗口属性
-        self.setWindowTitle("MIDI 速度转换工具")
-        self.setMinimumSize(800, 600)
+        self.setWindowTitle("MIDI处理工具")
+        self.setMinimumSize(1000, 700)
+        
+        # 设置窗口图标
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.ico')
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
         # 初始化处理器
         self.processor = MidiProcessor()
@@ -201,8 +219,13 @@ class MainWindow(QMainWindow):
         options_layout = QHBoxLayout(options_widget)
         options_layout.setContentsMargins(0, 0, 0, 0)
         
-        # 左侧参数设置
-        params_layout = QFormLayout()
+        # 优化选项部分的布局 - 重新设计布局
+        options_widget = QWidget()
+        options_layout = QVBoxLayout(options_widget)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 第一行：BPM和力度设置
+        first_row_layout = QHBoxLayout()
         
         # BPM设置
         bpm_layout = QHBoxLayout()
@@ -212,42 +235,98 @@ class MainWindow(QMainWindow):
         self.target_bpm_spinbox.setDecimals(2)
         self.target_bpm_spinbox.setValue(120.0)
         self.target_bpm_spinbox.setSuffix(" BPM")
+        bpm_layout.addWidget(self.target_bpm_label)
         bpm_layout.addWidget(self.target_bpm_spinbox)
-        params_layout.addRow(self.target_bpm_label, self.target_bpm_spinbox)
+        first_row_layout.addLayout(bpm_layout)
+        
+        # 添加一些间距
+        first_row_layout.addSpacing(20)
+        
+        # MIDI速度转换复选框 - 放在BPM后面
+        self.keep_original_tempo_checkbox = QCheckBox("MIDI速度转换")
+        self.keep_original_tempo_checkbox.setChecked(True)
+        self.keep_original_tempo_checkbox.setToolTip("勾选时根据设定的目标BPM处理MIDI文件，取消勾选时保持原始速度")
+        first_row_layout.addWidget(self.keep_original_tempo_checkbox)
+        
+        # 添加一些间距
+        first_row_layout.addSpacing(20)
         
         # 力度设置
+        velocity_layout = QHBoxLayout()
         self.velocity_label = QLabel("力度百分比:")
         self.velocity_spinbox = QSpinBox()
         self.velocity_spinbox.setRange(1, 100)
         self.velocity_spinbox.setValue(80)
         self.velocity_spinbox.setToolTip("设置音符力度的百分比 (1-100)")
-        params_layout.addRow(self.velocity_label, self.velocity_spinbox)
+        velocity_layout.addWidget(self.velocity_label)
+        velocity_layout.addWidget(self.velocity_spinbox)
+        first_row_layout.addLayout(velocity_layout)
         
-        options_layout.addLayout(params_layout)
+        # 添加一些间距
+        first_row_layout.addSpacing(20)
         
-        # 右侧复选框设置
-        checkboxes_layout = QVBoxLayout()
-        checkboxes_layout.setContentsMargins(20, 0, 0, 0)
+        # 统一力度复选框 - 放在力度百分比后面
+        self.set_velocity_checkbox = QCheckBox("统一音符力度")
+        self.set_velocity_checkbox.setChecked(True)
+        self.set_velocity_checkbox.setToolTip("统一所有音符的力度值")
+        first_row_layout.addWidget(self.set_velocity_checkbox)
+        
+        # 添加弹性空间
+        first_row_layout.addStretch()
+        
+        options_layout.addLayout(first_row_layout)
+        
+        # 第二行：其他选项横向排列
+        second_row_layout = QHBoxLayout()
         
         # 去除控制消息复选框
         self.remove_cc_checkbox = QCheckBox("移除控制消息")
         self.remove_cc_checkbox.setChecked(True)
         self.remove_cc_checkbox.setToolTip("移除所有CC控制消息（如延音踏板、弯音等）。取消勾选时，控制信息的时间位置会随速度变化同步调整")
-        checkboxes_layout.addWidget(self.remove_cc_checkbox)
-
-        # 统一力度复选框
-        self.set_velocity_checkbox = QCheckBox("统一音符力度")
-        self.set_velocity_checkbox.setChecked(True)
-        self.set_velocity_checkbox.setToolTip("统一所有音符的力度值")
-        checkboxes_layout.addWidget(self.set_velocity_checkbox)
+        second_row_layout.addWidget(self.remove_cc_checkbox)
+        
+        # 添加一些间距
+        second_row_layout.addSpacing(20)
         
         # 跳过匹配文件复选框
         self.skip_matched_checkbox = QCheckBox("跳过匹配文件")
         self.skip_matched_checkbox.setChecked(True)
         self.skip_matched_checkbox.setToolTip("如果MIDI文件已经符合设置条件则跳过处理")
-        checkboxes_layout.addWidget(self.skip_matched_checkbox)
+        second_row_layout.addWidget(self.skip_matched_checkbox)
         
-        options_layout.addLayout(checkboxes_layout)
+        # 添加一些间距
+        second_row_layout.addSpacing(20)
+        
+        # MIDI重叠检测复选框
+        self.check_overlap_checkbox = QCheckBox("检测音符重叠")
+        self.check_overlap_checkbox.setChecked(False)
+        self.check_overlap_checkbox.setToolTip("检测MIDI文件中的音符重叠情况")
+        second_row_layout.addWidget(self.check_overlap_checkbox)
+        
+        # 添加一些间距
+        second_row_layout.addSpacing(20)
+        
+        # 重叠音符处理复选框
+        self.fix_overlap_checkbox = QCheckBox("重叠音符处理")
+        self.fix_overlap_checkbox.setChecked(False)
+        self.fix_overlap_checkbox.setEnabled(False)  # 默认禁用
+        self.fix_overlap_checkbox.setToolTip("处理检测到的重叠音符：前后重叠时裁剪前一个音符，完全重叠时保留更早的音符")
+        second_row_layout.addWidget(self.fix_overlap_checkbox)
+        
+        # 添加一些间距
+        second_row_layout.addSpacing(20)
+        
+        # 多轨MIDI重叠处理复选框
+        self.multitrack_overlap_checkbox = QCheckBox("跨轨道重叠处理")
+        self.multitrack_overlap_checkbox.setChecked(False)
+        self.multitrack_overlap_checkbox.setEnabled(False)  # 默认禁用
+        self.multitrack_overlap_checkbox.setToolTip("处理跨轨道的音符重叠。默认情况下，多轨MIDI仅处理各轨道内部的重叠，跨轨道重叠被视为正常编曲（如和弦）。启用此选项将处理所有重叠。")
+        second_row_layout.addWidget(self.multitrack_overlap_checkbox)
+        
+        # 添加弹性空间
+        second_row_layout.addStretch()
+        
+        options_layout.addLayout(second_row_layout)
         
         file_layout.addRow("选项:", options_widget)
         
@@ -283,9 +362,9 @@ class MainWindow(QMainWindow):
         results_layout = QVBoxLayout(results_widget)
         
         # 创建表格显示处理结果
-        self.result_table = QTableWidget(0, 6)  # 修改为6列，移除输出路径列
+        self.result_table = QTableWidget(0, 8)  # 修改为8列，添加重叠音符处理列
         self.result_table.setHorizontalHeaderLabels([
-            "文件名", "原始速度", "目标速度", "音符力度", "删除控制信息", "状态"
+            "文件名", "原始速度", "目标速度", "音符力度", "删除控制信息", "重叠检测", "重叠处理", "状态"
         ])
         self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.result_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)  # 文件名列自适应
@@ -313,6 +392,16 @@ class MainWindow(QMainWindow):
         
         # 设置中心部件
         self.setCentralWidget(central_widget)
+        
+        # 连接复选框信号
+        self.keep_original_tempo_checkbox.stateChanged.connect(self.on_keep_original_tempo_changed)
+        self.set_velocity_checkbox.stateChanged.connect(self.on_set_velocity_changed)
+        self.check_overlap_checkbox.stateChanged.connect(self.on_check_overlap_changed)
+        self.fix_overlap_checkbox.stateChanged.connect(self.on_fix_overlap_changed)
+        self.multitrack_overlap_checkbox.stateChanged.connect(self.on_multitrack_overlap_changed)
+        
+        # 初始化界面状态
+        self.update_ui_state()
     
     def set_input_directory(self, paths):
         # 先检查是否包含目录
@@ -322,6 +411,7 @@ class MainWindow(QMainWindow):
             # 如果有目录，使用第一个目录
             self.input_directory = directories[0]
             self.midi_files = []
+            self.input_dir_edit.setText(self.input_directory)
         else:
             # 收集所有MIDI文件
             midi_files = []
@@ -370,8 +460,8 @@ class MainWindow(QMainWindow):
     
     def start_processing(self):
         """开始处理所有文件"""
-        if not self.midi_files:
-            QMessageBox.warning(self, "警告", "请先添加MIDI文件")
+        if not self.midi_files and not self.input_directory:
+            QMessageBox.warning(self, "警告", "请先添加MIDI文件或选择目录")
             return
 
         if not self.output_directory:
@@ -384,6 +474,10 @@ class MainWindow(QMainWindow):
         set_velocity = self.set_velocity_checkbox.isChecked()
         velocity_percent = self.velocity_spinbox.value()
         skip_matched = self.skip_matched_checkbox.isChecked()
+        keep_original_tempo = self.keep_original_tempo_checkbox.isChecked()
+        check_overlap = self.check_overlap_checkbox.isChecked()
+        fix_overlap = self.fix_overlap_checkbox.isChecked()
+        multitrack_overlap = self.multitrack_overlap_checkbox.isChecked()
 
         # 切换到结果选项卡
         self.tabs.setCurrentIndex(0)
@@ -406,7 +500,11 @@ class MainWindow(QMainWindow):
             remove_cc=remove_cc,
             set_velocity=set_velocity,
             velocity_percent=velocity_percent,
-            skip_matched=skip_matched
+            skip_matched=skip_matched,
+            keep_original_tempo=keep_original_tempo,
+            check_overlap=check_overlap,
+            fix_overlap=fix_overlap,
+            multitrack_overlap=multitrack_overlap
         )
         
         # 连接信号
@@ -482,9 +580,38 @@ class MainWindow(QMainWindow):
             cc_status = "已处理" if result["cc_removed"] else "未处理"
         self.result_table.setItem(row, 4, QTableWidgetItem(cc_status))
         
+        # 重叠检测状态
+        if "overlap_status" in result:
+            overlap_status = result["overlap_status"]
+            # 如果有重叠详细信息，添加到显示中
+            if "overlap_details" in result and result["overlap_details"]:
+                overlap_display = f"{overlap_status}\n{result['overlap_details']}"
+            else:
+                overlap_display = overlap_status
+        else:
+            overlap_display = "未检测"
+        
+        overlap_item = QTableWidgetItem(overlap_display)
+        # 检查是否有重叠（包括多轨重叠格式）
+        if ("存在重叠" in overlap_status or "轨道内重叠" in overlap_status or 
+            "多轨全局重叠" in overlap_status or "跨轨道重叠" in overlap_status):
+            overlap_item.setForeground(Qt.red)
+        self.result_table.setItem(row, 5, overlap_item)
+        
+        # 重叠音符处理状态
+        if "fix_overlap_status" in result:
+            fix_overlap_status = result["fix_overlap_status"]
+        else:
+            fix_overlap_status = "未处理"
+        
+        fix_overlap_item = QTableWidgetItem(fix_overlap_status)
+        if "已处理" in fix_overlap_status:
+            fix_overlap_item.setForeground(Qt.blue)
+        self.result_table.setItem(row, 6, fix_overlap_item)
+        
         # 处理状态
         status_item = QTableWidgetItem(result["status"])
-        self.result_table.setItem(row, 5, status_item)
+        self.result_table.setItem(row, 7, status_item)
         
         # 设置状态单元格的颜色
         if "错误" in result["status"]:
@@ -591,12 +718,32 @@ class MainWindow(QMainWindow):
                 else:
                     cc_status = "已处理" if result["cc_removed"] else "未处理"
                 
+                # 获取重叠检测状态
+                if "overlap_status" in result:
+                    overlap_status = result["overlap_status"]
+                    # 如果有重叠详细信息，添加到导出中
+                    if "overlap_details" in result and result["overlap_details"]:
+                        # 使用分号分隔，避免Excel中的换行符问题
+                        overlap_export = f"{overlap_status}; {result['overlap_details']}"
+                    else:
+                        overlap_export = overlap_status
+                else:
+                    overlap_export = "未检测"
+                
+                # 获取重叠音符处理状态
+                if "fix_overlap_status" in result:
+                    fix_overlap_export = result["fix_overlap_status"]
+                else:
+                    fix_overlap_export = "未处理"
+                
                 data.append({
                     "文件名": result["filename"],
                     "原始速度": tempo_text,
                     "目标速度": f"{result['target_bpm']:.2f} BPM" if isinstance(result['target_bpm'], (int, float)) else str(result['target_bpm']) + " BPM",
                     "音符力度": velocity_status,
                     "删除控制信息": cc_status,
+                    "重叠检测": overlap_export,
+                    "重叠处理": fix_overlap_export,
                     "状态": result["status"],
                     "文件路径": result["path"],
                     "音符数量": result["note_count"]
@@ -615,4 +762,77 @@ class MainWindow(QMainWindow):
                 pass
                 
         except Exception as e:
-            QMessageBox.warning(self, "导出错误", f"导出Excel时出错: {str(e)}") 
+            QMessageBox.warning(self, "导出错误", f"导出Excel时出错: {str(e)}")
+    
+    def on_keep_original_tempo_changed(self, state):
+        """当保持原始速度复选框状态改变时的响应"""
+        self.update_ui_state()
+    
+    def on_set_velocity_changed(self, state):
+        """当统一音符力度复选框状态改变时的响应"""
+        self.update_ui_state()
+    
+    def on_check_overlap_changed(self, state):
+        """当检测音符重叠复选框状态改变时的响应"""
+        self.update_ui_state()
+    
+    def on_fix_overlap_changed(self, state):
+        """当重叠音符处理复选框状态改变时的响应"""
+        self.update_ui_state()
+    
+    def on_multitrack_overlap_changed(self, state):
+        """当多轨道重叠处理复选框状态改变时的响应"""
+        # 多轨道重叠处理不需要特殊处理，只是传递参数
+        pass
+    
+    def update_ui_state(self):
+        """更新界面状态，根据复选框状态启用/禁用相关控件"""
+        # 根据MIDI速度转换复选框状态控制目标BPM
+        # 勾选时启用速度转换（目标BPM可用），取消勾选时保持原始速度（目标BPM禁用）
+        enable_speed_conversion = self.keep_original_tempo_checkbox.isChecked()
+        self.target_bpm_spinbox.setEnabled(enable_speed_conversion)
+        self.target_bpm_label.setEnabled(enable_speed_conversion)
+        
+        # 根据统一音符力度复选框状态控制力度百分比
+        set_velocity = self.set_velocity_checkbox.isChecked()
+        self.velocity_spinbox.setEnabled(set_velocity)
+        self.velocity_label.setEnabled(set_velocity)
+        
+        # 根据检测音符重叠复选框状态控制重叠音符处理选项
+        check_overlap = self.check_overlap_checkbox.isChecked()
+        self.fix_overlap_checkbox.setEnabled(check_overlap)
+        
+        # 根据重叠音符处理复选框状态控制多轨道重叠处理选项
+        fix_overlap = self.fix_overlap_checkbox.isChecked()
+        self.multitrack_overlap_checkbox.setEnabled(check_overlap and fix_overlap)
+        
+        # 设置禁用状态的样式
+        disabled_style = "color: #888888; background-color: #f0f0f0;"
+        enabled_style = ""
+        
+        # 更新目标BPM的样式
+        if not enable_speed_conversion:
+            self.target_bpm_spinbox.setStyleSheet(disabled_style)
+            self.target_bpm_label.setStyleSheet("color: #888888;")
+        else:
+            self.target_bpm_spinbox.setStyleSheet(enabled_style)
+            self.target_bpm_label.setStyleSheet("")
+        
+        # 更新力度百分比的样式
+        if not set_velocity:
+            self.velocity_spinbox.setStyleSheet(disabled_style)
+            self.velocity_label.setStyleSheet("color: #888888;")
+        else:
+            self.velocity_spinbox.setStyleSheet(enabled_style)
+            self.velocity_label.setStyleSheet("")
+        
+        # 更新重叠音符处理选项的样式
+        if not check_overlap:
+            self.fix_overlap_checkbox.setStyleSheet("color: #888888;")
+            self.multitrack_overlap_checkbox.setStyleSheet("color: #888888;")
+        else:
+            self.fix_overlap_checkbox.setStyleSheet("")
+            if not fix_overlap:
+                self.multitrack_overlap_checkbox.setStyleSheet("color: #888888;")
+            else:
+                self.multitrack_overlap_checkbox.setStyleSheet("") 

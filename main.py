@@ -65,6 +65,11 @@ def main():
     """
     app.setStyleSheet(style_sheet)
     
+    # 设置应用程序图标
+    icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.ico')
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+    
     # 创建主窗口
     window = MainWindow()
     
