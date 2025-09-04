@@ -83,6 +83,7 @@ class MidiProcessor:
             bpm_matches = False
             
             # 只有当MIDI有且仅有一个速度信息，且该速度与目标速度一致时，才认为BPM匹配
+            # 变速MIDI始终需要处理（当用户勾选了速度转换时）
             if not has_multiple_tempos:
                 bpm_matches = abs(original_bpm - target_bpm) < 0.1  # 允许0.1的误差
             else:
@@ -480,8 +481,13 @@ class MidiProcessor:
             # 5. 强制处理模式（skip_matched=False，用户要求处理所有文件）
             
             # 检查是否需要BPM转换
-            needs_bpm_conversion = (keep_original_tempo and 
-                                  abs(self._tempo_to_bpm(self.original_tempo or 500000) - target_bpm) >= 0.1)
+            # 变速MIDI在用户勾选了速度转换时始终需要处理
+            if has_multiple_tempos and keep_original_tempo:
+                needs_bpm_conversion = True
+            else:
+                # 单速度MIDI：只有当用户勾选了速度转换且速度不匹配时才需要转换
+                needs_bpm_conversion = (keep_original_tempo and 
+                                      abs(self._tempo_to_bpm(self.original_tempo or 500000) - target_bpm) >= 0.1)
             
             # 检查是否需要移除控制消息
             needs_cc_removal = remove_cc and any(
